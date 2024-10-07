@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Router Example</title>
+  <style>
+    .page {
+      display: none;
+    }
+
+    .page.current {
+      display: block;
+    }
+
+    .nested-page {
+      display: none;
+    }
+
+    .nested-page.current {
+      display: block;
+    }
+
+    .enter-fade {
+      animation: fadeIn 0.3s forwards;
+    }
+
+    .leave-fade {
+      animation: fadeOut 0.3s forwards;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes fadeOut {
+      from {
+        opacity: 1;
+      }
+
+      to {
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <nav>
+    <ul>
+      <li><a href="#/home">Home</a></li>
+      <li><a href="#/about">About</a></li>
+    </ul>
+  </nav>
+
+  <div id="routerView" data-animationName="fade">
+    <div class="page" data-hash="/home">
+      <h1>Home Page</h1>
+      <nav>
+        <ul>
+          <li><a href="#/home/sub1">Sub1</a></li>
+          <li><a href="#/home/sub2">Sub2</a></li>
+        </ul>
+      </nav>
+      <div class="nested-page" data-hash="/home/sub1">
+        <h2>Sub1 Page</h2>
+        <nav>
+          <ul>
+            <li><a href="#/home/sub1/sub1-1">Sub1-1</a></li>
+            <li><a href="#/home/sub1/sub1-2">Sub1-2</a></li>
+          </ul>
+        </nav>
+        <div class="nested-page" data-hash="/home/sub1/sub1-1">
+          <h3>Sub1-1 Page</h3>
+        </div>
+        <div class="nested-page" data-hash="/home/sub1/sub1-2">
+          <h3>Sub1-2 Page</h3>
+        </div>
+      </div>
+      <div class="nested-page" data-hash="/home/sub2">
+        <h2>Sub2 Page</h2>
+      </div>
+    </div>
+    <div class="page" data-hash="/about">
+      <h1>About Page</h1>
+    </div>
+  </div>
+
+  <script>
+    class Router {
+      routes = {};
+      beforeHook = null;
+      afterHook = null;
+      viewSelector = '#routerView';
+      stackPages = true;
+      historyFlag = '';
+      history = [];
+      routeMap = [];
+      defaultRoute = '#/home';
+
+      constructor(config = {}) {
+        this.routeMap = config.routes || [];
+        this.viewSelector = config.viewSelector || this.viewSelector;
+        this.stackPages = config.stackPages || this.stackPages;
+
+        if (!this.routeMap.length) {
+          const selector = `${this.viewSelector} .page`;
+          const pages = document.querySelectorAll(selector);
+          for (const page of pages) {
+            const hash = page.getAttribute('data-hash');
+            const name = hash.slice(1);
+            this.routeMap.push({
+              path: hash,
+              name,
+              callback: this.createCallback(name),
+              children: [],
+            });
+          }
+        }
+
+        this.mapRoutes();
+        this.initEventListeners();
+      }
+
+      getParamsFromUrl() {
+        const [hashName, paramsString] = location.hash.slice(1).split('?');
+        const params = paramsString ? paramsString.split('&') : [];
+        const query = {};
+
+        // 解析查询参数
+        for (const param of params) {
+          const [key, value] = param.split('=');
+          if (key) {
+            query[key] = decodeURIComponent(value || '');
+          }
+        }
+
+        // 解析嵌套路由路径
+        const pathParts = hashName.split('/').filter(Boolean);
+        const fullPath = `/${pathParts.join('/')}`;
+
+        return { path: fullPath, query };
+      }
+
+      createCallback(name) {
+        return (currentHash) => window[name] && window[name](currentHash);
+      }
+
+      generateKey() {
+        return 'xxxxxxxx'.replace(/[xy]/g, c => {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      }
+
+      initEventListeners() {
+        window.addEventListener('load', this.historyChange.bind(this));
+        window.addEventListener('hashchange', this.historyChange.bind(this));
+      }
+
+      historyChange(event) {
+        const currentHash = this.getParamsFromUrl();
+        const historyKey = `router-${this.viewSelector}-history`;
+        this.history = JSON.parse(window.sessionStorage.getItem(historyKey)) || [];
+
+        const index = this.history.findIndex(h => h.hash === currentHash.path && h.key === currentHash.query.key);
+
+        if (index !== -1) {
+          if (index === this.history.length - 1) {
+            this.historyFlag = 'refresh';
+          } else {
+            this.historyFlag = 'back';
+            this.history.length = index + 1;
+          }
+        } else {
+          this.historyFlag = 'forward';
+          const item = { key: currentHash.query.key, hash: currentHash.path, query: currentHash.query };
+          this.history.push(item);
+        }
+
+        if (!this.stackPages) {
+          this.historyFlag = 'forward';
+        }
+
+        window.sessionStorage.setItem(historyKey, JSON.stringify(this.history));
+        this.urlChange();
+      }
+
+      changeView(currentHash) {
+        const pages = document.getElementsByClassName('page');
+        const [previousPage] = [...document.getElementsByClassName('current')].slice(-1);
+        let currentPage = null;
+
+        // 重置所有页面的类名
+        for (const page of pages) {
+          page.className = 'page';
+        }
+
+        // 重置所有嵌套路由页面的类名
+        const nestedPages = document.getElementsByClassName('nested-page');
+        for (const page of nestedPages) {
+          page.className = 'nested-page';
+        }
+
+
+        // 重新获取当前页面
+        currentPage = document.querySelector(`[data-hash="${currentHash.path}"]`);
+
+        if (this.historyFlag === 'back') {
+          this.addClass(currentPage, 'current');
+        } else if (this.historyFlag === 'forward' || this.historyFlag === 'refresh') {
+          this.addClass(currentPage, 'current');
+          currentPage.scrollTop = 0;
+        }
+
+        // 处理嵌套路由
+        this.handlePageRoute(currentHash.path, currentHash);
+
+        if (this.afterHook) this.afterHook(currentHash);
+      }
+
+      urlChange() {
+        const currentHash = this.getParamsFromUrl();
+        const matchedRoute = this.findMatchedRoute(currentHash.path);
+
+        if (matchedRoute) {
+          if (this.beforeHook) {
+            this.beforeHook({
+              to: { path: currentHash.path, query: currentHash.query },
+              next: () => this.changeView(currentHash)
+            });
+          } else {
+            this.changeView(currentHash);
+          }
+        } else {
+          window.location.hash = this.defaultRoute;
+        }
+      }
+
+      mapRoutes() {
+        for (const route of this.routeMap) {
+          if (route.name === 'redirect') {
+            this.defaultRoute = route.path;
+          } else {
+            const newPath = route.path.replace(/\s*/g, '');
+            this.routes[newPath] = { callback: route.callback, children: route.children || [] };
+          }
+        }
+      }
+
+      findMatchedRoute(path) {
+        const parts = path.split('/').filter(Boolean);
+        let currentRoute = this.routes[path] || this.routes[`/${parts[0]}`];
+
+        parts.shift(); // 移除顶级路径部分
+        while (parts.length > 0 && currentRoute?.children) {
+          const nextPart = parts.shift();
+          currentRoute = currentRoute.children.find(child => child.path === `/${nextPart}`);
+          if (!currentRoute) break;
+        }
+
+        return currentRoute;
+      }
+
+      handlePageRoute(path, currentHash) {
+        const parts = path.split('/').filter(Boolean);
+        let currentRoute = this.routes[path] || this.routes[`/${parts[0]}`];
+
+        if (currentRoute) {
+          this.recursiveHandlePageRoute(currentRoute, parts, currentHash);
+        }
+      }
+
+      recursiveHandlePageRoute(currentRoute, parts, currentHash) {
+        if (!currentRoute) return;
+
+        const isNeedCallback = this.historyFlag === 'forward' || this.historyFlag === 'refresh'
+
+        // 顶级父路由 直接执行
+        if (parts.length === 1 && isNeedCallback) {
+          currentRoute.callback(currentHash)
+          return
+        };
+
+        const fullPaths = [];
+        let currentPath = '';
+
+        for (const part of parts) {
+          currentPath += `/${part}`;
+          fullPaths.push(currentPath);
+        }
+
+        // 去除顶级父路由
+        parts.shift();
+
+        let currrouter = currentRoute
+
+        parts.forEach((part) => {
+          const nextRoute = currrouter.children.find(child => child.path === `/${part}`)
+          if (nextRoute) {
+            currrouter = nextRoute
+          }
+        });
+
+        let isbubble = currrouter?.bubble || false
+
+        // 调用顶级父路由的回调函数（如果允许冒泡）
+        if (isbubble && currentRoute.callback && isNeedCallback) {
+          currentRoute.callback(currentHash);
+        }
+
+        let parentRoute = currentRoute;
+        while (parentRoute.children && parts.length > 0) {
+          const nextFullPath = fullPaths.shift();
+          const currentPage = document.querySelector(`[data-hash="${nextFullPath}"]`);
+          if (currentPage) {
+            this.addClass(currentPage, 'current');
+          }
+          const nextPart = parts.shift();
+          const nextRoute = parentRoute.children.find(child => child.path === `/${nextPart}`);
+          if (nextRoute) {
+            // 如果子路由允许冒泡或者判断已经到了顶级路由
+            if (isbubble || parts.length == 0) {
+              if (nextRoute.callback && isNeedCallback) {
+                nextRoute.callback(currentHash);
+              }
+            }
+            parentRoute = nextRoute;
+          } else {
+            break;
+          }
+        }
+      }
+
+      // DOM 操作方法
+      hasClass(elem, cls) {
+        cls = cls || '';
+        if (cls.replace(/\s/g, '').length === 0) return false;
+        return new RegExp(` ${cls} `).test(` ${elem.className} `);
+      }
+
+      addClass(ele, cls) {
+        if (!this.hasClass(ele, cls)) {
+          ele.className = `${ele.className ? `${ele.className} ` : ''}${cls}`;
+        }
+      }
+
+      removeClass(elem, cls) {
+        if (this.hasClass(elem, cls)) {
+          let newClass = ` ${elem.className.replace(/[\t\r\n]/g, '')} `;
+          while (newClass.includes(` ${cls} `)) {
+            newClass = newClass.replace(` ${cls} `, ' ');
+          }
+          elem.className = newClass.trim();
+        }
+      }
+
+      beforeEach(callback) {
+        if (typeof callback === 'function') {
+          this.beforeHook = callback;
+        } else {
+          console.error('路由切换前钩子函数不正确');
+        }
+      }
+
+      afterEach(callback) {
+        if (typeof callback === 'function') {
+          this.afterHook = callback;
+        } else {
+          console.error('路由切换后回调函数不正确');
+        }
+      }
+    }
+
+    window.linkTo = (path) => {
+      window.location.hash = `${path.includes('?') ? path : `${path}?`}key=${this.genKey()}`;
+    };
+  </script>
+  <script>
+    // 初始化路由器实例
+    const router = new Router({
+      viewSelector: '#routerView',
+      stackPages: true,
+      routes: [
+        {
+          path: '/home',
+          name: 'home',
+          callback: function (currentHash) {
+            console.log('Home page loaded:', currentHash);
+          },
+          children: [
+            {
+              path: '/sub1',
+              name: 'sub1',
+              bubble: true,
+              callback: function (currentHash) {
+                console.log('Sub1 page loaded:', currentHash);
+              },
+              children: [
+                {
+                  path: '/sub1-1',
+                  name: 'sub1-1',
+                  callback: function (currentHash) {
+                    console.log('Sub1-1 page loaded:', currentHash);
+                  }
+                },
+                {
+                  path: '/sub1-2',
+                  name: 'sub1-2',
+                  callback: function (currentHash) {
+                    console.log('Sub1-2 page loaded:', currentHash);
+                  }
+                }
+              ]
+            },
+            {
+              path: '/sub2',
+              name: 'sub2',
+              callback: function (currentHash) {
+                console.log('Sub2 page loaded:', currentHash);
+              }
+            }
+          ]
+        },
+        {
+          path: '/about',
+          name: 'about',
+          callback: function (currentHash) {
+            console.log('About page loaded:', currentHash);
+          }
+        }
+      ]
+    })
+
+    router.beforeEach(function (transition) {
+      transition.next()
+    })
+    router.afterEach(function (transition) {
+      console.log("切换后", transition)
+    })
+  </script>
+</body>
+
+</html>
